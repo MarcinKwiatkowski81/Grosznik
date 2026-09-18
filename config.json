@@ -1,0 +1,13 @@
+{
+  "token": "",
+
+  "allowed_users": [],
+  "allowed_chats": [],
+
+  "bootstrap": true,
+
+  "poll_timeout_sec": 30,
+  "offset_file": "state/offset",
+  "drop_pending_on_start": true,
+  "log_level": "info"
+}

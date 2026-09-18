@@ -1,0 +1,22 @@
+services:
+  grosznik:
+    build:
+      context: ..
+      dockerfile: Grosznik/Dockerfile
+    container_name: grosznik
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - grosznik_data:/data
+    environment:
+      - GROSZNIK_DB=/data/grosznik.db
+      - GROSZNIK_WWW=/app/www
+      - GROSZNIK_PORT=8080
+      - LUA_CPATH=/app/modules/?.so
+      - JWT_SECRET=${JWT_SECRET:-change_me_in_production}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_ALLOWED_USERS=${TELEGRAM_ALLOWED_USERS:-}
+
+volumes:
+  grosznik_data:
