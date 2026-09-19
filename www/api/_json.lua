@@ -16,10 +16,15 @@ function M.encode(v)
         return string.format('%.10g', v)
     elseif t == 'string'  then return '"' .. esc(v) .. '"'
     elseif t == 'table'   then
-        -- array check: all keys are consecutive integers starting at 1
+        -- array check: consecutive integer keys 1..n
+        -- An empty table {} with no keys at all is treated as [] (empty array),
+        -- because G.query() returns {} for zero rows and callers expect an array.
         local n = #v
-        local isArray = (n > 0)
-        if isArray then
+        local isArray = true
+        if n == 0 then
+            -- Empty table is an array unless it has any keys at all
+            for _ in pairs(v) do isArray = false; break end
+        else
             for k in pairs(v) do
                 if type(k) ~= 'number' or k < 1 or k > n or k ~= math.floor(k) then
                     isArray = false; break
@@ -59,7 +64,7 @@ local function decode_string(s, i)
         if c == '"' then return table.concat(out), i+1 end
         if c == '\\' then
             i = i+1; c = s:sub(i,i)
-            local esc_map = {['"']='"',['\\']='\\',['/']='\/',
+            local esc_map = {['"']='"',['\\']='\\',['/']=  '/',
                              ['n']='\n',['r']='\r',['t']='\t',['b']='\b',['f']='\f'}
             out[#out+1] = esc_map[c] or c
         else

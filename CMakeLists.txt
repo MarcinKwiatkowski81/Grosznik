@@ -19,7 +19,10 @@ set_target_properties(grosznik_lua PROPERTIES
     PREFIX       ""
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/modules"
 )
-target_include_directories(grosznik_lua PRIVATE ${LUA54_INC})
+target_include_directories(grosznik_lua PRIVATE
+    ${LUA54_INC}
+    ${HTTPD_DIR}/include   # needed for Module.h → RequestCtx in httpd_module_handle
+)
 target_link_libraries(grosznik_lua PRIVATE
     ${SQLITE3_LIB}
     OpenSSL::Crypto

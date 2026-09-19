@@ -1,14 +1,25 @@
-// grosznik_module.cpp — Lua 5.4 C extension
-// Exposes SQLite DB access, JWT HS256, and password hashing to Lua scripts.
+// grosznik_module.cpp — Lua 5.4 C extension + HTTPD module C ABI wrapper
+//
+// Dual role:
+//   1. HTTPD .so plugin:  exports the six httpd_module_* symbols so the server
+//      can load it via dlopen().  The module claims no file extensions and
+//      never handles requests itself — it only needs to be resident so Lua
+//      scripts can call  require("grosznik").
+//
+//   2. Lua C extension:  exports  luaopen_grosznik  so Lua's require() works.
+//      The SQLite handle and JWT secret are initialised once in
+//      httpd_module_init() (server start-up) rather than per Lua state.
 //
 // Usage in Lua:  local G = require("grosznik")
-//
-// Build: g++ -shared -fPIC -std=c++17 -O2 -I/usr/include/lua5.4
-//          grosznik_module.cpp -o grosznik.so -lsqlite3 -lssl -lcrypto
 //
 // Env vars:
 //   GROSZNIK_DB  – SQLite file path  (default: /data/grosznik.db)
 //   JWT_SECRET   – HMAC-SHA256 key   (default: change_me_in_production)
+
+// HTTPD module ABI — pulled in only for the type definitions; we must not
+// drag in Module.h's C++ classes into a C-ABI shared object, but we need
+// RequestCtx to satisfy the handle function signature.
+#include <Module.h>
 
 #include <lua5.4/lua.hpp>
 #include <sqlite3.h>
@@ -24,6 +35,9 @@
 #include <string>
 #include <sstream>
 #include <vector>
+
+// ── Visibility macro (matches lua_module.cpp convention) ─────────────────────
+#define HTTPD_EXPORT extern "C" __attribute__((visibility("default")))
 
 // ── Globals ───────────────────────────────────────────────────────────────────
 static sqlite3*    gDb{nullptr};
@@ -239,7 +253,7 @@ static int l_now(lua_State* L) {
     lua_pushinteger(L,(lua_Integer)time(nullptr)); return 1;
 }
 
-// ── Module registration ───────────────────────────────────────────────────────
+// ── Lua function table ────────────────────────────────────────────────────────
 static const luaL_Reg kLib[] = {
     {"query",          l_query},
     {"exec",           l_exec},
@@ -251,16 +265,20 @@ static const luaL_Reg kLib[] = {
     {nullptr, nullptr}
 };
 
-extern "C" int luaopen_grosznik(lua_State* L) {
+// ── Lua C extension entry-point (require("grosznik")) ─────────────────────────
+// DB + secret are already open from httpd_module_init; this just builds the
+// Lua library table for the calling state.
+HTTPD_EXPORT int luaopen_grosznik(lua_State* L) {
+    // Guard: if somehow called before httpd_module_init (e.g. standalone test)
     if (!gDb) {
         const char* p = getenv("GROSZNIK_DB");
         if (!p) p = "/data/grosznik.db";
-        if (sqlite3_open(p,&gDb)!=SQLITE_OK) {
-            lua_pushstring(L,sqlite3_errmsg(gDb)); return lua_error(L);
+        if (sqlite3_open(p, &gDb) != SQLITE_OK) {
+            lua_pushstring(L, sqlite3_errmsg(gDb));
+            return lua_error(L);
         }
-        sqlite3_exec(gDb,"PRAGMA journal_mode=WAL;",nullptr,nullptr,nullptr);
-        sqlite3_exec(gDb,"PRAGMA foreign_keys=ON;", nullptr,nullptr,nullptr);
-        fprintf(stderr,"[GROSZNIK] SQLite: %s\n",p);
+        sqlite3_exec(gDb, "PRAGMA journal_mode=WAL;", nullptr, nullptr, nullptr);
+        sqlite3_exec(gDb, "PRAGMA foreign_keys=ON;",  nullptr, nullptr, nullptr);
     }
     if (gJwtSecret.empty()) {
         const char* s = getenv("JWT_SECRET");
@@ -268,4 +286,60 @@ extern "C" int luaopen_grosznik(lua_State* L) {
     }
     luaL_newlib(L, kLib);
     return 1;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// HTTPD module C ABI
+// Required symbols: httpd_module_name, httpd_module_handle (at minimum).
+// Optional but declared: version, init, fini, extensions.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// The module does not handle any HTTP requests on its own; it is loaded purely
+// so that the Lua C extension (luaopen_grosznik) is resident in the process and
+// reachable by Lua's require() mechanism.
+
+HTTPD_EXPORT const char* httpd_module_name()    { return "grosznik"; }
+HTTPD_EXPORT const char* httpd_module_version() { return "1.0.0"; }
+
+HTTPD_EXPORT int httpd_module_init(const char* /*config*/) {
+    // Open SQLite once, at server start-up, shared across all Lua states.
+    if (!gDb) {
+        const char* p = getenv("GROSZNIK_DB");
+        if (!p) p = "/data/grosznik.db";
+        if (sqlite3_open(p, &gDb) != SQLITE_OK) {
+            fprintf(stderr, "[GROSZNIK] Cannot open DB %s: %s\n",
+                    p, sqlite3_errmsg(gDb));
+            sqlite3_close(gDb);
+            gDb = nullptr;
+            return -1;
+        }
+        sqlite3_exec(gDb, "PRAGMA journal_mode=WAL;", nullptr, nullptr, nullptr);
+        sqlite3_exec(gDb, "PRAGMA foreign_keys=ON;",  nullptr, nullptr, nullptr);
+        fprintf(stderr, "[GROSZNIK] SQLite opened: %s\n", p);
+    }
+    if (gJwtSecret.empty()) {
+        const char* s = getenv("JWT_SECRET");
+        gJwtSecret = s ? s : "change_me_in_production";
+    }
+    fprintf(stderr, "[GROSZNIK] module initialised\n");
+    return 0;   // 0 = success
+}
+
+HTTPD_EXPORT void httpd_module_fini() {
+    std::lock_guard<std::mutex> lk(gDbMu);
+    if (gDb) {
+        sqlite3_close(gDb);
+        gDb = nullptr;
+    }
+    fprintf(stderr, "[GROSZNIK] module unloaded\n");
+}
+
+// No file extensions — this module never handles requests.
+HTTPD_EXPORT const char** httpd_module_extensions() {
+    return nullptr;
+}
+
+// Always returns 0 ("not handled") — lets the next module (Lua) take over.
+HTTPD_EXPORT int httpd_module_handle(httpd::RequestCtx* /*ctx*/) {
+    return 0;
 }

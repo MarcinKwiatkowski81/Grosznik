@@ -44,7 +44,7 @@ elseif method == 'POST' and action == 'logout' then
 elseif method == 'POST' and action == 'register' then
     -- Only allow if no users exist yet
     local count = G.query('SELECT COUNT(*) as n FROM users')
-    if count[1].n > 0 then
+    if count[1] and count[1].n > 0 then
         return util.err(403, 'Rejestracja zamknieta')
     end
     local b     = util.body()
@@ -83,7 +83,7 @@ elseif method == 'GET' and action == 'me' then
 -- GET /api/auth.lua?action=setup_status
 elseif method == 'GET' and action == 'setup_status' then
     local count = G.query('SELECT COUNT(*) as n FROM users')
-    util.ok({needs_setup = (count[1].n == 0)})
+    util.ok({needs_setup = (not count[1] or count[1].n == 0)})
 
 -- PUT /api/auth.lua?action=profile
 elseif method == 'PUT' and action == 'profile' then

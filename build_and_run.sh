@@ -82,6 +82,14 @@ pairs = [
     ('TELEBOT_DIR',            absp(bld.get('telebot_dir', '../Telebot'))),
     ('BUILD_JOBS',             bld.get('jobs', 0)),
     ('LUA_CPATH',              mods_dir + '/?.so'),
+    ('LUA_PATH',
+     absp(c.get('www_root', './www')) + '/api/?.lua'
+     + ';' + absp(c.get('www_root', './www')) + '/api/?/init.lua'
+     + ';/usr/local/share/lua/5.4/?.lua'
+     + ';/usr/local/share/lua/5.4/?/init.lua'
+     + ';/usr/share/lua/5.4/?.lua'
+     + ';/usr/share/lua/5.4/?/init.lua'
+     + ';./?.lua;./?/init.lua'),
 ]
 
 for k, v in pairs:
@@ -208,6 +216,7 @@ log "  Baza danych    : $GROSZNIK_DB"
 log "  lua_module.so  : $GROSZNIK_LUA_MODULE"
 log "  grosznik.so    : $GROSZNIK_MODULE"
 log "  LUA_CPATH      : $LUA_CPATH"
+log "  LUA_PATH       : $LUA_PATH"
 log "  Workers/Threads: ${GROSZNIK_WORKERS} x ${GROSZNIK_THREADS}"
 [[ -n "$TELEGRAM_BOT_TOKEN" ]] && log "  Telegram bot   : aktywny"
 echo ""

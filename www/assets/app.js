@@ -34,9 +34,9 @@ const el = id => document.getElementById(id);
 const init = async () => {
   const setup = await api('/api/auth.lua?action=setup_status');
   if (setup.ok && setup.data.needs_setup) {
-    el('login-form').style.display  = 'none';
-    el('setup-form').style.display  = '';
-    el('login-screen').style.display = '';
+    el('login-form').style.display   = 'none';
+    el('setup-form').style.display   = 'block';
+    el('login-screen').style.display = 'block';
     return;
   }
   const me = await api('/api/auth.lua?action=me');
@@ -68,15 +68,17 @@ const logout = async () => {
 };
 
 const showLogin = () => {
-  el('login-form').style.display  = '';
-  el('setup-form').style.display  = 'none';
-  el('login-screen').style.display = '';
-  el('app-screen').style.display  = 'none';
+  el('login-form').style.display   = '';
+  el('setup-form').style.display   = 'none';
+  el('login-screen').style.display = 'block';
+  el('app-screen').style.display   = 'none';
+  el('app-screen').classList.remove('visible');
 };
 
 const showApp = async () => {
   el('login-screen').style.display = 'none';
   el('app-screen').style.display   = 'flex';
+  el('app-screen').classList.add('visible');
   const [aR, cR] = await Promise.all([api('/api/accounts.lua'), api('/api/categories.lua')]);
   accounts   = aR.ok ? aR.data : [];
   categories = cR.ok ? cR.data : [];
@@ -92,7 +94,14 @@ const navigate = async view => {
     a.classList.toggle('active', a.dataset.view === view));
   const main = el('main-content');
   main.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text2)">Ładowanie…</div>';
-  const views = {dashboard, accountsView, transactionsView, obligationsView, reportsView, settingsView};
+  const views = {
+    dashboard,
+    accounts:     accountsView,
+    transactions: transactionsView,
+    obligations:  obligationsView,
+    reports:      reportsView,
+    settings:     settingsView
+  };
   await (views[view] || views.dashboard)(main);
 };
 
@@ -482,10 +491,10 @@ const modalNewAccount = () => {
       <button class="btn btn-ghost" onclick="App.closeModal()">Anuluj</button>
       <button class="btn btn-primary" onclick="App.saveNewAccount()">Utwórz</button>
     </div>`);
-  App._acctType('checking');
+  _acctType('checking');
 };
 
-App._acctType = type => {
+const _acctType = type => {
   const extra = el('ma-extra');
   if (type==='savings'||type==='deposit') {
     extra.innerHTML = `
@@ -652,7 +661,7 @@ return {
   modalNewTransaction, saveNewTransaction, deleteTransaction,
   modalNewObligation, saveNewObligation, payObligation,
   saveSettings,
-  _acctType: ()=>{}, _txRender: null, _txTypeToggle: ()=>{},
+  _acctType, _txRender: null, _txTypeToggle: ()=>{},
   _setTxFilter: ()=>{}, _setTxAcct: ()=>{}
 };
 

@@ -18,6 +18,12 @@
 body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
        background: var(--bg); color: var(--text); font-size: 14px; }
 
+/* Screens are hidden by default — JS shows the correct one after init.
+   Important: this must be lower specificity than the inline style JS applies,
+   but it guarantees the sidebar (position:fixed, z-index:100) inside
+   #app-screen cannot intercept clicks on the login form before JS runs. */
+.screen { display: none; }
+
 /* ── Login ── */
 .login-box {
   max-width: 360px; margin: 0 auto; padding: 60px 20px;
@@ -40,7 +46,9 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 .err-msg { color: var(--red); font-size: 13px; text-align: center; min-height: 18px; }
 
 /* ── App layout ── */
-#app-screen { display: flex; }
+/* #app-screen gets display:flex set by JS (showApp).  The .screen rule above
+   gives the correct hidden default; we only specify the layout mode here. */
+#app-screen.visible { display: flex; }
 .sidebar {
   width: var(--sidebar-w); min-height: 100vh;
   background: var(--bg2); border-right: 1px solid var(--border);
@@ -146,6 +154,9 @@ tr:hover td { background: var(--bg3); }
   position: fixed; inset: 0; background: rgba(0,0,0,0.72);
   display: flex; align-items: center; justify-content: center; z-index: 200;
 }
+/* When hidden, prevent the invisible overlay from intercepting pointer events */
+.modal-overlay[style*="display:none"],
+.modal-overlay[style*="display: none"] { pointer-events: none; }
 .modal {
   background: var(--bg2); border: 1px solid var(--border);
   border-radius: var(--radius); min-width: 420px; max-width: 560px;
