@@ -32,8 +32,15 @@ const el = id => document.getElementById(id);
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 const init = async () => {
-  const setup = await api('/api/auth.lua?action=setup_status');
-  if (setup.ok && setup.data.needs_setup) {
+  // Use server-injected boot data from index.lhtml — avoids an extra round-trip.
+  // Falls back to API call when served without .lhtml (e.g. plain static file).
+  const boot = window.__GROSZNIK__ || null;
+  const needsSetup = boot ? boot.needs_setup : await api('/api/auth.lua?action=setup_status')
+    .then(r => r.ok && r.data.needs_setup);
+
+  if (needsSetup) {
+    // index.lhtml already hides/shows the correct form — but ensure state is right
+    // in case someone navigated here with a cached page.
     el('login-form').style.display   = 'none';
     el('setup-form').style.display   = 'block';
     el('login-screen').style.display = 'block';
@@ -411,29 +418,72 @@ const reportsView = async (c) => {
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 const settingsView = async (c) => {
-  const meR = await api('/api/auth.lua?action=me');
-  const me  = meR.ok ? meR.data : {};
+  const [meR, stR] = await Promise.all([
+    api('/api/auth.lua?action=me'),
+    api('/api/settings.lua')
+  ]);
+  const me = meR.ok ? meR.data : {};
+  const st = stR.ok ? stR.data : {};
+  const botSet  = st.telegram_bot_token_set  || false;
+  const botHint = st.telegram_bot_token_hint || '';
+
   c.innerHTML = `
   <div class="section-header"><h2>Ustawienia</h2></div>
-  <div class="card" style="max-width:480px">
+
+  <div class="card" style="max-width:520px;margin-bottom:16px">
     <div class="card-title">Profil użytkownika</div>
     <div class="form-group"><label>Nazwa użytkownika</label>
       <input value="${me.username||''}" disabled style="opacity:.6"></div>
     <div class="form-group"><label>E-mail</label>
       <input value="${me.email||''}" disabled style="opacity:.6"></div>
-    <div class="form-group"><label>Telegram Chat ID</label>
-      <input id="cfg-tg" value="${me.telegram_chat_id||''}" placeholder="np. 123456789">
-      <small style="color:var(--text2)">Wpisz swoje Chat ID (znajdź je pisząc do @userinfobot)</small></div>
     <div class="form-group"><label>Domyślna waluta</label>
       <select id="cfg-cur">
-        ${['PLN','EUR','USD','GBP'].map(c=>`<option ${me.default_currency===c?'selected':''}>${c}</option>`).join('')}
+        ${['PLN','EUR','USD','GBP'].map(x=>`<option ${me.default_currency===x?'selected':''}>${x}</option>`).join('')}
       </select></div>
     <div class="form-group"><label>Alert salda — próg (PLN)</label>
       <input id="cfg-alert" type="number" value="${me.balance_alert_threshold||500}"></div>
     <div class="form-group"><label>Nowe hasło (pozostaw puste aby nie zmieniać)</label>
       <input id="cfg-pwd" type="password" placeholder="Minimum 8 znaków"></div>
-    <button class="btn btn-primary" onclick="App.saveSettings()">Zapisz ustawienia</button>
+    <button class="btn btn-primary" onclick="App.saveSettings()">Zapisz profil</button>
     <div id="cfg-msg" style="margin-top:10px;font-size:13px"></div>
+  </div>
+
+  <div class="card" style="max-width:520px;margin-bottom:16px">
+    <div class="card-title">Bot Telegram — powiadomienia</div>
+    <p style="color:var(--text2);font-size:13px;margin-bottom:12px">
+      Bot wysyła powiadomienia o zobowiązaniach, alertach salda i raport tygodniowy.
+      Token uzyskasz od <a href="https://t.me/BotFather" target="_blank" style="color:var(--accent)">@BotFather</a>.
+      <strong>Zmiana tokenu wymaga restartu serwera.</strong>
+    </p>
+    <div class="form-group">
+      <label>Token bota Telegram</label>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input id="cfg-bot-token" type="password" style="flex:1"
+          placeholder="${botSet ? '(skonfigurowany — ' + botHint + ')' : '123456789:ABCdef...'}">
+        <button class="btn btn-ghost" title="Pokaż/ukryj"
+          onclick="App.toggleBotTokenVisibility()">👁</button>
+      </div>
+      ${botSet
+        ? `<small style="color:var(--green)">✅ Bot skonfigurowany: ${botHint}&nbsp;
+           <a href="#" onclick="App.clearBotToken();return false" style="color:var(--red)">Usuń token</a></small>`
+        : '<small style="color:var(--text2)">Token nie jest skonfigurowany — bot wyłączony</small>'}
+    </div>
+    <button class="btn btn-primary" onclick="App.saveBotToken()">Zapisz token</button>
+    <div id="cfg-bot-msg" style="margin-top:10px;font-size:13px"></div>
+  </div>
+
+  <div class="card" style="max-width:520px">
+    <div class="card-title">Twoje konto Telegram</div>
+    <p style="color:var(--text2);font-size:13px;margin-bottom:12px">
+      Chat ID znajdziesz pisząc do <a href="https://t.me/userinfobot" target="_blank" style="color:var(--accent)">@userinfobot</a>.
+    </p>
+    <div class="form-group"><label>Telegram Chat ID</label>
+      <input id="cfg-tg" value="${me.telegram_chat_id||''}" placeholder="np. 123456789"></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-primary" onclick="App.saveTelegramId()">Zapisz Chat ID</button>
+      ${botSet ? '<button class="btn btn-ghost" onclick="App.testTelegram()">📨 Wyślij wiadomość testową</button>' : ''}
+    </div>
+    <div id="cfg-tg-msg" style="margin-top:10px;font-size:13px"></div>
   </div>`;
 };
 
@@ -441,7 +491,6 @@ const saveSettings = async () => {
   const r = await api('/api/auth.lua?action=profile', {
     method:'PUT',
     body:{
-      telegram_chat_id:        el('cfg-tg').value,
       default_currency:        el('cfg-cur').value,
       balance_alert_threshold: parseFloat(el('cfg-alert').value)||500,
       new_password:            el('cfg-pwd').value
@@ -451,6 +500,54 @@ const saveSettings = async () => {
   msg.textContent = r.ok ? '✅ Zapisano' : (r.data&&r.data.error||'Błąd zapisu');
   msg.style.color = r.ok ? 'var(--green)' : 'var(--red)';
 };
+
+const saveTelegramId = async () => {
+  const r = await api('/api/auth.lua?action=profile', {
+    method:'PUT', body:{ telegram_chat_id: el('cfg-tg').value }
+  });
+  const msg = el('cfg-tg-msg');
+  msg.textContent = r.ok ? '✅ Chat ID zapisany' : (r.data&&r.data.error||'Błąd');
+  msg.style.color = r.ok ? 'var(--green)' : 'var(--red)';
+};
+
+const saveBotToken = async () => {
+  const tok = el('cfg-bot-token').value.trim();
+  if (!tok) { return; }
+  const r = await api('/api/settings.lua', {
+    method:'PUT', body:{ telegram_bot_token: tok }
+  });
+  const msg = el('cfg-bot-msg');
+  if (r.ok) {
+    msg.textContent = '✅ Token zapisany. Zrestartuj serwer aby bot zaczął działać.';
+    msg.style.color = 'var(--green)';
+    el('cfg-bot-token').value = '';
+  } else {
+    msg.textContent = r.data&&r.data.error || 'Błąd zapisu';
+    msg.style.color = 'var(--red)';
+  }
+};
+
+const clearBotToken = async () => {
+  if (!confirm('Usunąć token bota? Bot przestanie działać po restarcie serwera.')) return;
+  const r = await api('/api/settings.lua', { method:'PUT', body:{ telegram_bot_token: '' } });
+  if (r.ok) await settingsView(el('main-content'));
+  else alert(r.data&&r.data.error || 'Błąd');
+};
+
+const toggleBotTokenVisibility = () => {
+  const inp = el('cfg-bot-token');
+  inp.type = inp.type === 'password' ? 'text' : 'password';
+};
+
+const testTelegram = async () => {
+  const msg = el('cfg-tg-msg');
+  msg.textContent = '⏳ Wysyłam…';
+  msg.style.color = 'var(--text2)';
+  const r = await api('/api/settings.lua?action=test_telegram', { method:'POST' });
+  msg.textContent = r.ok ? '✅ ' + r.data.message : '❌ ' + (r.data&&r.data.error||'Błąd');
+  msg.style.color = r.ok ? 'var(--green)' : 'var(--red)';
+};
+
 
 // ── Modal ─────────────────────────────────────────────────────────────────────
 const showModal = (title, body) => {
@@ -660,7 +757,8 @@ return {
   modalNewAccount, modalEditAccount, saveNewAccount, updateAccountBalance, deleteAccount,
   modalNewTransaction, saveNewTransaction, deleteTransaction,
   modalNewObligation, saveNewObligation, payObligation,
-  saveSettings,
+  saveSettings, saveTelegramId, saveBotToken, clearBotToken,
+  toggleBotTokenVisibility, testTelegram,
   _acctType, _txRender: null, _txTypeToggle: ()=>{},
   _setTxFilter: ()=>{}, _setTxAcct: ()=>{}
 };

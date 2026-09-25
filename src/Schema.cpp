@@ -106,6 +106,13 @@ CREATE TABLE IF NOT EXISTS notification_log (
     status   TEXT    NOT NULL DEFAULT 'sent'
 );
 
+-- Ustawienia aplikacji (klucz-wartość, niezwiązane z użytkownikiem)
+CREATE TABLE IF NOT EXISTS app_settings (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL DEFAULT '',
+    updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+);
+
 -- Domyślne kategorie (user_id NULL = systemowe, wstawiane tylko raz)
 INSERT OR IGNORE INTO categories(id, user_id, parent_id, name, type, icon, color) VALUES
   (1,  NULL, NULL, 'Przychody',          'income',   '💰', '#2ea043'),

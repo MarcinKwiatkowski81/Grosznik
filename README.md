@@ -36,6 +36,7 @@ Osobisty menedżer finansów z interfejsem webowym i opcjonalnym botem Telegram.
 - `/wyprawa <kwota> [opis]` — szybkie dodanie wydatku przez Telegram
 - `/pomoc` — lista komend
 - Automatyczne powiadomienia: termin płatności za 3 dni, termin dzisiaj, alert niskiego salda, tygodniowy raport (poniedziałek 8:00)
+- **Token bota konfigurowalny z poziomu aplikacji** — zakładka Ustawienia, bez edycji plików ani restartu serwera do konfiguracji
 
 ### Bezpieczeństwo
 - JWT w httpOnly cookie (niedostępne z JavaScript)
@@ -69,6 +70,12 @@ Osobisty menedżer finansów z interfejsem webowym i opcjonalnym botem Telegram.
             ├── require('_json')     ← enkoder/dekoder JSON
             └── require('grosznik') ← G.query/exec
 ```
+
+**Jak działa `index.lhtml`:**
+
+`GET /` → HTTPD → `lua_module` wykonuje `index.lhtml` → Lua pyta SQLite
+o stan bazy i token bota → wstrzykuje `window.__GROSZNIK__ = {...}` do HTML
+→ `app.js` czyta te dane synchronicznie zamiast robić dodatkowy `fetch()`.
 
 **Zależności siostrzane** (repozytoria w tym samym katalogu nadrzędnym):
 - `../HTTPD` — serwer HTTP z modułami dynamicznymi (zawiera `lua_module`)
@@ -129,6 +136,9 @@ nano config.json
 bash build_and_run.sh
 # → http://localhost:8080
 ```
+
+Token bota Telegram konfiguruje się po zalogowaniu w **Ustawienia → Bot Telegram**.
+Nie trzeba edytować plików — token jest zapisany w bazie i wczytywany przy starcie.
 
 ---
 
@@ -244,11 +254,21 @@ bash build_and_run.sh --help
 
 ### Konfiguracja
 
+**Sposób zalecany — przez interfejs aplikacji (bez edycji plików):**
+
 1. [@BotFather](https://t.me/BotFather) → utwórz bota → skopiuj token
-2. Wpisz token w `config.json` → `telegram.bot_token`
-3. Swoje Chat ID znajdź u [@userinfobot](https://t.me/userinfobot)
-4. Wpisz Chat ID w aplikacji: **Ustawienia → Telegram Chat ID**
-5. Opcjonalnie: ogranicz dostęp przez `telegram.allowed_users`
+2. Zaloguj się do Grosznika, przejdź do **Ustawienia → Bot Telegram**
+3. Wklej token, kliknij **Zapisz token** → token trafia do `app_settings` w bazie
+4. Zrestartuj serwer: `bash build_and_run.sh --run-only`
+5. Swoje Chat ID znajdź u [@userinfobot](https://t.me/userinfobot)
+6. Wpisz Chat ID w **Ustawienia → Twoje konto Telegram**, kliknij **Zapisz Chat ID**
+7. Kliknij **Wyślij wiadomość testową** — weryfikuje działanie bota
+
+**Sposób alternatywny — przez zmienną środowiskową (jak poprzednio):**
+
+Ustaw `TELEGRAM_BOT_TOKEN` w `config.json` lub środowisku. Token z bazy ma **wyższy priorytet** — jeśli jest w `app_settings`, env var jest ignorowana.
+
+Opcjonalnie: ogranicz dostęp do komend bota przez `telegram.allowed_users` w `config.json`.
 
 ### Komendy
 
@@ -293,7 +313,7 @@ Grosznik/
 ├── include/              # Nagłówki Schema.h, BotHandler.h, Notifier.h
 │
 ├── www/
-│   ├── index.html           # SPA shell
+│   ├── index.lhtml          # SPA shell (Lua: wstrzykuje boot data przy renderze)
 │   ├── assets/
 │   │   ├── app.css          # Ciemny motyw (CSS custom properties)
 │   │   └── app.js           # Frontend (vanilla JS, bez frameworka)
@@ -305,7 +325,8 @@ Grosznik/
 │       ├── categories.lua   # CRUD kategorii
 │       ├── transactions.lua # CRUD transakcji + aktualizacja sald
 │       ├── obligations.lua  # CRUD zobowiązań + instancje miesięczne
-│       └── reports.lua      # Cashflow, kategorie, prognoza
+│       ├── reports.lua      # Cashflow, kategorie, prognoza
+│       └── settings.lua     # Ustawienia aplikacji (token bota Telegram)
 │
 ├── CMakeLists.txt
 ├── build_and_run.sh
@@ -391,6 +412,17 @@ Typy: `income` · `expense` · `transfer` · `card_payment` · `atm`
 | `categories` | `?year=Y&month=M` | `[{name, color, icon, total}]` |
 | `forecast` | — | `{current_balance, pending_costs, expected_income, projected_eom, forecast_points[]}` |
 
+### `/api/settings.lua` — ustawienia aplikacji
+
+| Metoda | Parametry | Opis |
+|---|---|---|
+| `GET` | — | `{telegram_bot_token_set, telegram_bot_token_hint}` — nigdy nie zwraca pełnego tokenu |
+| `PUT` | body | `{telegram_bot_token?, notify_on_low_balance?}` — zapisuje w tabeli `app_settings` |
+| `POST` | `?action=test_telegram` | Wysyła testową wiadomość na Chat ID użytkownika przez skonfigurowanego bota |
+
+Token bota jest przechowywany w `app_settings` i odczytywany przy starcie serwera
+(priorytet nad zmienną `TELEGRAM_BOT_TOKEN`). Zmiana wymaga restartu serwera.
+
 ---
 
 ## Schemat bazy danych
@@ -434,6 +466,10 @@ obligation_instances
 
 notification_log
   id, user_id, type, channel, message, sent_at INTEGER, status
+
+app_settings
+  key TEXT PRIMARY KEY, value TEXT, updated_at INTEGER
+  -- Przechowuje: telegram_bot_token, notify_on_low_balance, ...
 ```
 
 `PRAGMA journal_mode=WAL` — bezpieczna współbieżność przy wielu wątkach I/O.
