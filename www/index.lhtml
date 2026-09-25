@@ -1,0 +1,90 @@
+<%--
+    Grosznik — main SPA shell.
+    Served as .lhtml so Lua can inject server-side data (setup status,
+    CSP nonce, build info) before any JS runs.
+    Logic is at the top; markup follows — per example.lhtml convention.
+--%>
+<%
+    local G   = require('grosznik')
+    local json = require('_json')
+
+    -- Check whether first-time setup is needed so the correct form is shown
+    -- immediately, without a client-side round-trip to /api/auth.lua?action=setup_status.
+    local count  = G.query('SELECT COUNT(*) as n FROM users')
+    local needs_setup = not (count[1] and count[1].n > 0)
+
+    -- Read bot token status (is it configured?) — expose only a boolean, never the token itself.
+    local cfg_rows = G.query("SELECT value FROM app_settings WHERE key='telegram_bot_token'")
+    local bot_configured = (cfg_rows[1] and cfg_rows[1].value ~= nil and cfg_rows[1].value ~= '')
+
+    -- Data injected into the page as a JSON island — avoids an extra API round-trip on load.
+    local boot_data = json.encode({
+        needs_setup    = needs_setup,
+        bot_configured = bot_configured,
+    })
+%>
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Grosznik</title>
+<link rel="stylesheet" href="/assets/app.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<!-- Server-side boot data — avoids extra API round-trip on initial load -->
+<script>window.__GROSZNIK__ = <%! boot_data %>;</script>
+</head>
+<body>
+<!-- LOGIN SCREEN — visible by default, JS hides it after auth check -->
+<div id="login-screen">
+  <div class="login-box">
+    <div class="logo">💰 Grosznik</div>
+    <div id="login-form"<% if needs_setup then %> style="display:none"<% end %>>
+      <h2>Logowanie</h2>
+      <input type="text"     id="l-user" placeholder="Nazwa użytkownika" autocomplete="username">
+      <input type="password" id="l-pass" placeholder="Hasło" autocomplete="current-password">
+      <button onclick="App.login()">Zaloguj się</button>
+      <div id="login-err" class="err-msg"></div>
+    </div>
+    <div id="setup-form"<% if not needs_setup then %> style="display:none"<% end %>>
+      <h2>Pierwsze uruchomienie</h2>
+      <p>Utwórz konto administratora:</p>
+      <input type="text"     id="s-user"  placeholder="Nazwa użytkownika">
+      <input type="email"    id="s-email" placeholder="E-mail">
+      <input type="password" id="s-pass"  placeholder="Hasło (min. 8 znaków)">
+      <button onclick="App.register()">Utwórz konto</button>
+      <div id="setup-err" class="err-msg"></div>
+    </div>
+  </div>
+</div>
+
+<!-- APP SHELL -->
+<div id="app-screen" class="screen" style="display:none">
+  <nav class="sidebar">
+    <div class="brand">💰 Grosznik</div>
+    <a href="#" data-view="dashboard"     class="nav-item active">📊 Dashboard</a>
+    <a href="#" data-view="accounts"      class="nav-item">🏦 Konta</a>
+    <a href="#" data-view="transactions"  class="nav-item">💸 Transakcje</a>
+    <a href="#" data-view="obligations"   class="nav-item">📅 Zobowiązania</a>
+    <a href="#" data-view="reports"       class="nav-item">📈 Raporty</a>
+    <a href="#" data-view="settings"      class="nav-item">⚙️ Ustawienia</a>
+    <div class="spacer"></div>
+    <a href="#" class="nav-item logout" onclick="App.logout()">🚪 Wyloguj</a>
+  </nav>
+  <main id="main-content" class="content"></main>
+</div>
+
+<!-- MODAL -->
+<div id="modal-overlay" class="modal-overlay" style="display:none">
+  <div class="modal">
+    <div class="modal-header">
+      <span id="modal-title"></span>
+      <button class="modal-close" onclick="App.closeModal()">✕</button>
+    </div>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<script src="/assets/app.js"></script>
+</body>
+</html>
